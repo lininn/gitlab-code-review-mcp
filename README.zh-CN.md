@@ -28,7 +28,7 @@
 1.  克隆此仓库：
 
     ```bash
-    git clone https://github.com/mehmetakinn/gitlab-mcp-code-review.git
+    git clone https://github.com/lininn/gitlab-code-review-mcp.git
     cd gitlab-mcp-code-review
     ```
 

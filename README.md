@@ -28,7 +28,7 @@ An MCP (Model Context Protocol) server for integrating AI assistants like Claude
 1. Clone this repository:
 
 ```bash
-git clone https://github.com/mehmetakinn/gitlab-mcp-code-review.git
+git clone https://github.com/lininn/gitlab-code-review-mcp.git
 cd gitlab-mcp-code-review
 ```
 
