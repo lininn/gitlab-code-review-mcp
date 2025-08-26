@@ -40,13 +40,21 @@ def make_gitlab_api_request(ctx: Context, endpoint: str, method: str = "GET", da
     }
     
     try:
+        logger.info(f"Making {method} request to {url}")
+        logger.debug(f"Headers: {headers}")
+        response = None
         if method.upper() == "GET":
             response = requests.get(url, headers=headers, verify=True)
         elif method.upper() == "POST":
+            logger.debug(f"Request data: {data}")
             response = requests.post(url, headers=headers, json=data, verify=True)
         else:
             raise ValueError(f"Unsupported HTTP method: {method}")
         
+        if response is None:
+            logger.error("Request did not return a response.")
+            raise Exception("Request did not return a response.")
+
         if response.status_code == 401:
             logger.error("Authentication failed. Check your GitLab token.")
             raise Exception("Authentication failed. Please check your GitLab token.")
@@ -89,8 +97,8 @@ async def gitlab_lifespan(server: FastMCP) -> AsyncIterator[GitLabContext]:
 
 # Create MCP server
 mcp = FastMCP(
-    "GitLab MCP for Code Review",
-    description="MCP server for reviewing GitLab code changes",
+    name="GitLab MCP for Code Review",
+    instructions="MCP server for reviewing GitLab code changes",
     lifespan=gitlab_lifespan,
     dependencies=["python-dotenv", "requests"]
 )
@@ -312,6 +320,24 @@ def get_project_merge_requests(ctx: Context, project_id: str, state: str = "all"
     
     return mrs_info
 
+@mcp.tool()
+def get_review_guidelines(ctx: Context) -> str:
+    """
+    Get the code review guidelines.
+    
+    Returns:
+        The content of the code review guidelines file.
+    """
+    try:
+        with open("CODE_REVIEW_GUIDELINES.md", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        logger.error("CODE_REVIEW_GUIDELINES.md not found.")
+        raise FileNotFoundError("CODE_REVIEW_GUIDELINES.md not found.")
+    except Exception as e:
+        logger.error(f"Failed to read CODE_REVIEW_GUIDELINES.md: {str(e)}")
+        raise
+
 if __name__ == "__main__":
     try:
         logger.info("Starting GitLab Review MCP server")
@@ -319,4 +345,4 @@ if __name__ == "__main__":
         mcp.run(transport='stdio')
     except Exception as e:
         logger.error(f"Failed to start MCP server: {str(e)}")
-        raise 
+        raise

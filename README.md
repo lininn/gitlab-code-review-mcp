@@ -205,6 +205,22 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 See the [CONTRIBUTING.md](CONTRIBUTING.md) file for more details on the development process.
 
+## Code Review Standards
+
+This project follows strict code review standards to ensure quality and maintainability:
+
+- 📋 **Code Review Guidelines**: This project follows a strict set of code review guidelines to ensure quality and consistency. For detailed information on the review process, standards, and best practices, please see the [Code Review Guidelines](CODE_REVIEW_GUIDELINES.md).
+- ✅ **Review Checklist**: All pull requests should be checked against the [PULL_REQUEST_CHECKLIST.md](PULL_REQUEST_CHECKLIST.md) before submission.
+- 🔄 **CI/CD Pipeline**: We use GitLab CI for automated quality checks. Ensure all pipeline checks pass before requesting a review.
+- 📝 **Templates**: Please use the provided merge request and issue templates to ensure all necessary information is included.
+
+### Quick Start for Contributors
+
+1. Read the [Code Review Guidelines](CODE_REVIEW_GUIDELINES.md)
+2. Use the appropriate MR template when creating pull requests
+3. Ensure all CI checks pass before requesting review
+4. Address all reviewer feedback promptly
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

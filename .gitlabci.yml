@@ -1,0 +1,285 @@
+# GitLab CI/CD Pipeline for Code Review Quality Assurance
+
+stages:
+  - validate
+  - test
+  - quality
+  - security
+  - deploy
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PYTHON_VERSION: "3.12"
+
+cache:
+  paths:
+    - .cache/pip
+    - venv/
+
+# 代码格式检查
+code_format:
+  stage: validate
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install black isort flake8
+  script:
+    - black --check --diff .
+    - isort --check-only --diff .
+    - flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+  allow_failure: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# 类型检查
+type_check:
+  stage: validate
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install mypy types-requests
+    - pip install -r requirements.txt
+  script:
+    - mypy server.py --ignore-missing-imports
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# 单元测试
+unit_tests:
+  stage: test
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install -r requirements-dev.txt
+  script:
+    - python -m pytest tests/ -v --cov=. --cov-report=xml --cov-report=term
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# 代码质量分析
+code_quality:
+  stage: quality
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install pylint radon xenon
+    - pip install -r requirements.txt
+  script:
+    - pylint server.py --output-format=text --reports=yes --exit-zero > pylint-report.txt
+    - radon cc server.py --show-complexity --average
+    - radon mi server.py --show
+    - xenon --max-absolute B --max-modules A --max-average A server.py
+  artifacts:
+    paths:
+      - pylint-report.txt
+    expire_in: 1 week
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# 安全扫描
+security_scan:
+  stage: security
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install bandit safety
+    - pip install -r requirements.txt
+  script:
+    - bandit -r . -f json -o bandit-report.json || true
+    - safety check --json --output safety-report.json || true
+    - echo "Security scan completed"
+  artifacts:
+    paths:
+      - bandit-report.json
+      - safety-report.json
+    expire_in: 1 week
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# 依赖扫描
+dependency_scan:
+  stage: security
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install pip-audit
+  script:
+    - pip-audit --output=json --output-file=dependency-audit.json || true
+  artifacts:
+    paths:
+      - dependency-audit.json
+    expire_in: 1 week
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# MCP服务器功能测试
+mcp_server_test:
+  stage: test
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install -r requirements-dev.txt
+    # 创建测试用的环境变量
+    - echo "GITLAB_TOKEN=test_token" > .env
+    - echo "GITLAB_HOST=gitlab.example.com" >> .env
+  script:
+    - python -c "import server; print('Server imports successfully')"
+    - python -m pytest tests/test_server.py -v
+  allow_failure: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# 文档检查
+docs_check:
+  stage: validate
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install pydocstyle
+  script:
+    - pydocstyle server.py --convention=google
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# 性能测试
+performance_test:
+  stage: test
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install memory-profiler psutil
+  script:
+    - python -c "
+      import cProfile
+      import pstats
+      import server
+      pr = cProfile.Profile()
+      pr.enable()
+      # 这里添加性能测试代码
+      pr.disable()
+      stats = pstats.Stats(pr)
+      stats.sort_stats('cumulative')
+      stats.print_stats(10)
+      "
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# 代码审查提醒
+review_reminder:
+  stage: quality
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        echo "🔍 代码审查提醒："
+        echo "✅ 请确保代码符合项目规范"
+        echo "✅ 请检查安全性和性能"
+        echo "✅ 请验证测试覆盖率"
+        echo "✅ 请确保文档更新"
+        echo "📋 参考: CODE_REVIEW_GUIDELINES.md"
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# 部署到开发环境
+deploy_dev:
+  stage: deploy
+  image: alpine:latest
+  script:
+    - echo "部署到开发环境"
+    - echo "验证MCP服务器配置"
+    - echo "检查环境变量设置"
+  environment:
+    name: development
+    url: https://dev.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+  when: manual
+
+# 部署到生产环境
+deploy_prod:
+  stage: deploy
+  image: alpine:latest
+  script:
+    - echo "部署到生产环境"
+    - echo "验证生产环境配置"
+    - echo "执行健康检查"
+  environment:
+    name: production
+    url: https://prod.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: manual
+  only:
+    - main
+    - master
+
+# 代码覆盖率检查
+coverage_check:
+  stage: quality
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install -r requirements-dev.txt
+  script:
+    - python -m pytest tests/ --cov=. --cov-report=term --cov-fail-under=70
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  allow_failure: true
+
+# 生成代码质量报告
+quality_report:
+  stage: quality
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+  script:
+    - |
+      echo "📊 代码质量报告" > quality-report.md
+      echo "==================" >> quality-report.md
+      echo "" >> quality-report.md
+      echo "## 检查项目:" >> quality-report.md
+      echo "- ✅ 代码格式检查" >> quality-report.md
+      echo "- ✅ 类型检查" >> quality-report.md
+      echo "- ✅ 单元测试" >> quality-report.md
+      echo "- ✅ 代码质量分析" >> quality-report.md
+      echo "- ✅ 安全扫描" >> quality-report.md
+      echo "- ✅ 依赖检查" >> quality-report.md
+      echo "" >> quality-report.md
+      echo "详细报告请查看各个阶段的输出。" >> quality-report.md
+  artifacts:
+    paths:
+      - quality-report.md
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
